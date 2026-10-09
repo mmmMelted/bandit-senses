@@ -1,0 +1,15 @@
+[mod]
+name="Bandit Senses (SAIN-inspired AI)"
+id="bandit_senses"
+version="0.17.0"
+priority=0
+
+[autoload]
+BanditSenses="res://BanditSenses/Main.gd"
+
+[hooks]
+res://Scripts/Sensor.gd = "PriorityLOS, PlayerHearDetection"
+res://Scripts/Controller.gd = "PlayFootstep, PlayFootstepLand"
+res://Scripts/WeaponRig.gd = "PlayFire, PlayReload, PlayReloadEmpty, PlayReloadTactical, PlayMagazineAttachEmpty, PlayMagazineAttachTactical, PlayMagazineDetach, PlayMalfunctionClear, PlayInsert, PlayAmmoCheck"
+res://Scripts/AI.gd = "UpdateStatus, Decision, WeaponDamage, Parameters, Cover, Defend, Attack, Hide, ChangeState, SelectWeapon, Switch, FireAccuracy, FireFrequency, Selector, Death, Hunt, Loot"
+res://Scripts/Interface.gd = "Use, Charge, Load, UnloadMagazine, UnloadWeapon, ChangeMagazine, Craft"
