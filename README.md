@@ -45,7 +45,7 @@ Single player. Safe for existing saves.
 - **Replaces AI behaviour**, so it conflicts with other AI overhauls (AI System Overhaul, Improvised AI Tweaker,
   Simple Engagement and similar). Use one.
 - Works with my other mods: [AI Actually Loots](https://github.com/mmmMelted/ai-actually-loots) (if installed,
-  Bandit Senses hands looting to it), [Invisible Backpack Fix](https://github.com/mmmMelted/invisible-backpack-fix)
+  Bandit Senses hands looting to it), [Better Backpacks](https://github.com/mmmMelted/better-backpacks)
   and [Shot Indicator](https://github.com/mmmMelted/shot-indicator).
 
 ## Troubleshooting
