@@ -50,7 +50,7 @@ Single player. Safe for existing saves.
 
 ## Troubleshooting
 
-The game log (`%APPDATA%\Road to Vostok\logs\godot.log`) should show `[BanditSenses] v0.17.0 loaded`.
+The game log (`%APPDATA%\Road to Vostok\logs\godot.log`) should show `[BanditSenses] v0.17.1 loaded`.
 
 ## Credits
 

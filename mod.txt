@@ -1,7 +1,7 @@
 [mod]
 name="Bandit Senses (SAIN-inspired AI)"
 id="bandit_senses"
-version="0.17.0"
+version="0.17.1"
 priority=0
 
 [autoload]
