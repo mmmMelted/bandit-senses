@@ -34,7 +34,7 @@ extends Node
 ##   (AI tinted through walls by alert level) when Dev Tools is loaded.
 
 
-const VERSION := "0.17.1"
+const VERSION := "0.18.0"
 const TAG := "[BanditSenses] "
 const Brain = preload("res://BanditSenses/Brain.gd")
 const Cover = preload("res://BanditSenses/Cover.gd")
@@ -232,28 +232,6 @@ const CORNER_NEAR := 2.5
 const CORNER_PAUSE := Vector2(0.6, 1.2)
 
 
-## Scavenging: calm bots check every LOOT_CHECK s; containers within LOOT_RANGE (HOUSE_RANGE for hiders in their house),
-## fresh corpses within CORPSE_RANGE; LOOT_PER_VISIT items per visit, at most LOOT_CAP items carried.
-const LOOT_CHECK := Vector2(2.0, 4.0)
-const LOOT_RANGE := 35.0
-const HOUSE_RANGE := 15.0
-const CORPSE_RANGE := 50.0
-const CORPSE_FRESH := 900.0
-const LOOT_PER_VISIT := Vector2i(1, 3)
-const LOOT_CAP := 10
-const LOOT_TASK_TIMEOUT := 45.0
-const VISIT_FORGET := 600.0
-const RESERVE_TIME := 40.0
-## After a container, keep searching unchecked containers this close (same room/house) for SEARCH_ON_TIME s.
-const SEARCH_ON := 10.0
-const SEARCH_ON_TIME := 6.0
-const GRAB_TIME := 0.6
-const APPROACH_DIST := 0.9
-## Chance per check to go looting when calm, by faction (Rats and hiders at least 0.84).
-## Checks come every ~3 s while calm: Guards loot about once per 5 calm minutes, Military about once per 10.
-const LOOT_WILL := {AIData.Faction.Bandit: 0.5, AIData.Faction.Guard: 0.01, AIData.Faction.Military: 0.005}
-
-
 ## Barks: one combat callout per faction every BARK_COOLDOWN s.
 const BARK_COOLDOWN := 2.5
 ## Tactical tick: this many bots per physics frame (round robin) for morale, healing.
@@ -323,9 +301,6 @@ var _nadeScanT := 0.0
 var _lastBark := {}
 var _tickIndex := 0
 var _debugT := 0.0
-var _containers := []
-var _corpses := []
-var _builtinLoot := true
 
 
 
@@ -354,14 +329,8 @@ func _on_lib_ready():
 	_lib.hook("ai-updatestatus-post", _on_update_status)
 	_lib.hook("ai-weapondamage-post", _on_ai_damaged)
 	_lib.hook("ai-death-post", _on_ai_death)
-	# Built-in scavenging, unless the standalone "AI Actually Loots" mod is installed (it then does the looting).
-	_builtinLoot = !Engine.has_meta("AIActuallyLoots")
-	if _builtinLoot:
-		_lib.hook("ai-weapondamage-pre", _on_ai_damage_pre)
-		if _lib.hook("ai-loot", _on_loot) == -1:
-			push_warning(TAG + "AI.Loot is already replaced by another mod; looting may resume combat bots into Wander")
-	else:
-		print(TAG + "AI Actually Loots found: using it for looting")
+	# Looting is the standalone "AI Actually Loots" mod's job; Bandit Senses only hands it hiders to send back into ambush.
+	if Engine.has_meta("AIActuallyLoots"): print(TAG + "AI Actually Loots found: it does the looting")
 
 	_lib.hook("ai-parameters-post", _on_parameters)
 
@@ -629,13 +598,13 @@ func _investigate(ai, pos: Vector3, error: float, closeness: float = 1.0):
 	ai.sensor.hotTimer = max(ai.sensor.hotTimer, INVESTIGATE_HOT)
 
 
-	# Hiders and Rats out looting or wandering: back into ambush, don't go looking.
-	if (state == "Wander" || state == "Loot") && (ai.has_meta("bs_home") || ai.get_meta("bs_pers", "") == "Rat"):
-		_ambush_now(ai)
-		return
 	# Hiders looting for AI Actually Loots: let it take them back into ambush.
 	if (state == "Wander" || state == "Loot") && ai.has_meta("aal_home") && Engine.has_meta("AIActuallyLoots"):
 		Engine.get_meta("AIActuallyLoots").ambush(ai)
+		return
+	# Rats out looting or wandering: back into ambush, don't go looking.
+	if (state == "Wander" || state == "Loot") && ai.get_meta("bs_pers", "") == "Rat":
+		_ambush_now(ai)
 		return
 	# Calm bots go and look (sneaking if unseen). Bots already fighting re-decide instead of being forced into a creep.
 	if state in CALM_STATES || state == "Ambush":
@@ -743,10 +712,6 @@ func _decide(ai):
 
 
 	if _debug: print(TAG + ai.name + " [" + ai.get_meta("bs_pers") + "] " + before + " -> " + choice)
-
-func _on_ai_damage_pre(_hitbox, _damage, _vector, id):
-	var ai = _lib._caller
-	if _affects(ai) && !ai.dead && is_instance_valid(id): ai.set_meta("bs_last_attacker", id)
 
 func _on_ai_damaged(_hitbox, damage, _vector, id):
 	var ai = _lib._caller
@@ -1270,12 +1235,7 @@ func _on_change_state(state):
 	_register(ai)
 	ai.set_meta("bs_pose_t", _now())
 	ai.remove_meta("bs_rush")
-	if ai.has_meta("bs_loot_starting") || ai.has_meta("aal_starting"): return
-	if ai.has_meta("bs_loot"):
-		if state == "Wander":
-			if _continue_loot(ai): return
-		elif state != "Loot":
-			_end_loot(ai, false)
+	if ai.has_meta("aal_starting"): return
 
 	if state != "Hide" && state != "Ambush": _release_hide_point(ai)
 	if state == "Hunt" || state == "Switch": _update_gait(ai, true)
@@ -1351,10 +1311,8 @@ func _on_hide(_delta):
 
 	if ai.agent.is_target_reached() || ai.agent.is_navigation_finished():
 		var camper: bool = ai.get_meta("bs_pers", "") in ["Rat", "Timid"]
-		var homerun: bool = ai.has_meta("bs_homerun")
-		ai.remove_meta("bs_homerun")
 		if ai.has_meta("bs_dyncover"): _hold_cover(ai)
-		elif sneaking || camper || homerun || randi_range(0, 100) < 25: ai.ChangeState("Ambush")
+		elif sneaking || camper || randi_range(0, 100) < 25: ai.ChangeState("Ambush")
 		else: ai.ChangeState("Combat")
 	elif ai.sensor.hot && ai.sensor.PDistance < 10.0:
 		ai.ChangeState("Combat")
@@ -2011,18 +1969,6 @@ func _on_ai_death(_direction, _force):
 	var dead = _lib._caller
 	if !_affects(dead): return
 	var now := _now()
-	_end_loot(dead, false)
-	for key in ["bs_home", "bs_kill_loot", "bs_visited"]: dead.remove_meta(key)
-	if dead.container != null:
-		for i in range(_corpses.size() - 1, -1, -1):
-			if !is_instance_valid(_corpses[i]["c"]) || now - float(_corpses[i]["t"]) > CORPSE_FRESH: _corpses.remove_at(i)
-		_corpses.append({"c": dead.container, "t": now, "faction": dead.variant.faction})
-		# The shooter (an AI) loots its kill once things calm down.
-		if dead.has_meta("bs_last_attacker"):
-			var shooter = dead.get_meta("bs_last_attacker")
-			var killer = shooter.owner if is_instance_valid(shooter) else null
-			if killer != null && killer != dead && _affects(killer) && !killer.dead: killer.set_meta("bs_kill_loot", dead.container)
-	dead.remove_meta("bs_last_attacker")
 	var called := false
 	for ally in _live_bots():
 		if ally == dead || ally.variant.faction != dead.variant.faction: continue
@@ -2079,325 +2025,21 @@ func _stop_heal(ai):
 
 
 
+## ------------------------------------------------------------------------------------------------ rats
+
+## A Rat that senses something while out wandering or looting: get back into ambush (not hunt).
+func _ambush_now(ai):
+	if !is_instance_valid(ai.currentPoint): return
+	ai.ChangeState("Ambush")
+	ai.set_meta("bs_choice", "Ambush!")
+	if _debug: print(TAG + ai.name + " senses something -> ambush")
+
+
+
 ## ------------------------------------------------------------------------------------------------ grenade evasion
 
 func _on_node_added(node):
 	if node is RigidBody3D && "fuseTime" in node && "frag" in node && !_grenades.has(node): _grenades.append(node)
-	elif node is LootContainer: _containers.append(node)
-
-
-
-## ------------------------------------------------------------------------------------------------ scavenging
-
-## Vanilla looting never fires: the bots' $Tools/Loot Area3D has no collision mask and containers have no areas, so
-## GetLootPoint() never finds anything. This replaces the search with our own: calm bots pick a nearby container
-## (or a fresh corpse) that still has items, walk there in Wander, and vanilla's Wander -> Loot path does the rest.
-## Hiders/Rats loot their house and go back into ambush the moment something approaches.
-func _loot_tick(ai, now: float):
-	if ai.has_meta("bs_loot"):
-		var task: Dictionary = ai.get_meta("bs_loot")
-		# Stuck or interrupted (state changed without us noticing): give up after a while.
-		if now - float(task["t"]) > LOOT_TASK_TIMEOUT: _end_loot(ai, false)
-		return
-	if now < float(ai.get_meta("bs_loot_next", 0.0)): return
-	ai.set_meta("bs_loot_next", now + randf_range(LOOT_CHECK.x, LOOT_CHECK.y))
-
-
-	# Nomads never loot (houses, bodies or their own kills).
-	if ai.variant.faction == AIData.Faction.Nomad: return
-	if !_calm(ai) || ai.reload || ai.container == null || ai.container.loot.size() >= LOOT_CAP: return
-	# Inventory full: not even a 1x1 item would fit.
-	if !_fits(ai.container, Vector2.ONE): return
-	var states = ai.State
-	var state: int = ai.currentState
-	var hider: bool = state == states.Ambush
-	if !(state == states.Wander || state == states.Guard || state == states.Patrol || state == states.Idle || hider): return
-	var searching: bool = now < float(ai.get_meta("bs_search_until", 0.0))
-	var will: float = LOOT_WILL.get(ai.variant.faction, 0.2)
-	if ai.get_meta("bs_pers", "") == "Rat" || hider: will = max(will, 0.6) * 1.4
-	if ai.has_meta("bs_kill_loot") || searching: will = 1.0
-	if randf() > will: return
-
-
-	var reach: float = LOOT_RANGE
-	if hider || ai.has_meta("bs_home"): reach = HOUSE_RANGE
-	if searching: reach = SEARCH_ON
-	var target = _pick_loot(ai, now, reach)
-	if target == null: return
-	var point = _approach(ai, target)
-	if point == null:
-		_visited(ai)[target.get_instance_id()] = now
-		return
-	_start_loot(ai, target, hider, now, point)
-
-## Nearest lootable target: the bot's own kill first, then fresh corpses, then map containers.
-func _pick_loot(ai, now: float, reach: float):
-	var origin: Vector3 = ai.global_position
-	var visited := _visited(ai)
-	var best = null
-	var bestDist := reach
-
-
-	if ai.has_meta("bs_kill_loot"):
-		var kill = ai.get_meta("bs_kill_loot")
-		ai.remove_meta("bs_kill_loot")
-		if is_instance_valid(kill) && kill.is_inside_tree() && kill.global_position.distance_to(origin) < CORPSE_RANGE: return kill
-
-
-	for entry in _corpses:
-		var c = entry["c"]
-		if !is_instance_valid(c) || !c.is_inside_tree() || now - float(entry["t"]) > CORPSE_FRESH || _reserved(c, ai, now): continue
-		if now - float(visited.get(c.get_instance_id(), -INF)) < VISIT_FORGET: continue
-		# Bandits strip anyone; the others only loot enemies.
-		if entry["faction"] == ai.variant.faction && ai.variant.faction != AIData.Faction.Bandit: continue
-		var d: float = c.global_position.distance_to(origin)
-		if d < min(bestDist, CORPSE_RANGE):
-			best = c
-			bestDist = d
-	if best != null: return best
-
-
-	for c in _containers:
-		# Checked whether or not it holds anything: the bot can't know until it looks.
-		if !_is_map_container(c) || _reserved(c, ai, now): continue
-		if now - float(visited.get(c.get_instance_id(), -INF)) < VISIT_FORGET: continue
-		var d: float = c.global_position.distance_to(origin)
-		if d < bestDist:
-			best = c
-			bestDist = d
-	return best
-
-## Where to stand to loot `c`: a walkable spot about APPROACH_DIST from it, on its side, with a clear line from chest
-## height to it (the nearest navmesh point can be in the next room, behind the wall). Tries the side facing the AI
-## first, then the others. null = no such spot (treated as unreachable).
-func _approach(ai, c):
-	var base: Vector3 = c.global_position
-	var center: Vector3 = base + Vector3.UP * 0.5
-	var toward: Vector3 = ai.global_position - base
-	toward.y = 0.0
-	toward = toward.normalized() if toward.length() > 0.01 else Vector3.FORWARD
-	var world = ai.get_world_3d() if ai.is_inside_tree() else null
-	if world == null: return null
-	var space = world.direct_space_state
-	for angle in [0.0, 90.0, -90.0, 180.0]:
-		var want: Vector3 = base + toward.rotated(Vector3.UP, deg_to_rad(angle)) * APPROACH_DIST
-		var spot: Vector3 = NavigationServer3D.map_get_closest_point(ai.navmesh, want)
-		if Vector2(spot.x - want.x, spot.z - want.z).length() > 0.7 || abs(spot.y - base.y) > 1.5: continue
-		var query := PhysicsRayQueryParameters3D.create(spot + Vector3.UP * 1.2, center, ai.sensor.obstruction)
-		var hit: Dictionary = space.intersect_ray(query)
-		if hit.is_empty() || _part_of(hit["collider"], c): return spot
-	return null
-
-## The ray hit the container itself (or the object it sits in), not something next to it like a wall.
-func _part_of(collider, c) -> bool:
-	if !(collider is Node): return false
-	return collider == c || c.is_ancestor_of(collider) || collider.is_ancestor_of(c)
-
-func _start_loot(ai, target, hider: bool, now: float, point: Vector3):
-	target.set_meta("bs_reserved", [ai.get_instance_id(), now])
-	if hider && is_instance_valid(ai.currentPoint): ai.set_meta("bs_home", ai.currentPoint)
-	if ai.currentState != ai.State.Wander:
-		# Our own ChangeState hook must not treat this as a normal Wander (Rats would run off to hide).
-		ai.set_meta("bs_loot_starting", true)
-		ai.ChangeState("Wander")
-		ai.remove_meta("bs_loot_starting")
-		if ai.currentState != ai.State.Wander:
-			ai.currentState = ai.State.Wander
-			ai.ResetAnimator()
-			ai.animator["parameters/conditions/Wander"] = true
-			ai.speed = 1.0
-			ai.agent.target_desired_distance = 1.0
-	ai.set_meta("bs_loot", {"target": target, "left": randi_range(LOOT_PER_VISIT.x, LOOT_PER_VISIT.y), "t": now})
-	ai.looting = true
-	ai.lootTarget = target
-	ai.currentPoint = target
-	ai.MoveToPoint(point)
-	ai.set_meta("bs_choice", "Loot body" if _is_corpse(target) else "Loot")
-	if _debug: print(TAG + ai.name + " [" + str(ai.get_meta("bs_pers", "?")) + "] going to loot " + str(target.name) + " (" + str(snapped(ai.global_position.distance_to(target.global_position), 0.1)) + " m)")
-
-## Vanilla Loot() always ends with ChangeState("Wander"), even if a fight started meanwhile. Same steps, but it only
-## finishes (and only goes back to wandering) if the bot is still looting.
-func _on_loot():
-	var ai = _lib._caller
-	if !_affects(ai): return
-	_lib.skip_super()
-	_do_loot(ai)
-
-func _do_loot(ai):
-	ai.animator["parameters/Wander/P_Loot/request"] = AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE
-	ai.animator["parameters/Wander/R_Loot/request"] = AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE
-	await get_tree().create_timer(0.5, false).timeout
-	if !_still_looting(ai): return
-
-
-	# Open once, then grab up to the visit's item count one after another (or find nothing and move on).
-	var target = ai.lootTarget
-	var taken := 0
-	if is_instance_valid(target) && target is LootContainer:
-		ai.PlayLoot()
-		var wanted: int = int(ai.get_meta("bs_loot")["left"]) if ai.has_meta("bs_loot") else 1
-		for i in wanted:
-			await get_tree().create_timer(GRAB_TIME, false).timeout
-			if !_still_looting(ai) || ai.container.loot.size() >= LOOT_CAP || !_has_loot(target): break
-			var item = _take_fitting(ai, target)
-			if item == null: break
-			ai.container.loot.append(item)
-			ai.PlayPickup()
-			taken += 1
-			if _debug: print(TAG + ai.name + " looted " + str(item.itemData.name) + " from " + str(target.name))
-	await get_tree().create_timer(0.6 if taken == 0 else 0.8, false).timeout
-	if !_still_looting(ai): return
-	if taken == 0 && _debug: print(TAG + ai.name + " found nothing in " + str(target.name if is_instance_valid(target) else "?"))
-	ai.looting = false
-	ai.ChangeState("Wander")
-
-func _still_looting(ai) -> bool:
-	if !is_instance_valid(ai) || ai.dead: return false
-	if ai.currentState != ai.State.Loot:
-		ai.looting = false
-		return false
-	return true
-
-## Called from _on_change_state("Wander") after a visit: keep searching nearby, go home (hiders), or finish.
-func _continue_loot(ai) -> bool:
-	if !ai.has_meta("bs_loot"): return false
-	_end_loot(ai, true)
-	if _search_on(ai): return true
-	# Hiders go back to their hide point and wait there.
-	if ai.has_meta("bs_home") && is_instance_valid(ai.get_meta("bs_home")):
-		_go_home(ai)
-		return true
-	return false
-
-## More unchecked containers close by (same room/house): keep searching them before moving on.
-## Runs right after vanilla's ChangeState("Wander") picked a random waypoint, before the AI turns toward it: walking
-## straight on to the nearest unchecked container avoids the turn-to-leave-then-turn-back.
-func _search_on(ai) -> bool:
-	var now := _now()
-	var visited := _visited(ai)
-	var best = null
-	var bestDist := SEARCH_ON
-	for c in _containers:
-		if !_is_map_container(c) || _reserved(c, ai, now): continue
-		if now - float(visited.get(c.get_instance_id(), -INF)) < VISIT_FORGET: continue
-		var d: float = c.global_position.distance_to(ai.global_position)
-		if d < bestDist:
-			best = c
-			bestDist = d
-	if best == null: return false
-	var point = _approach(ai, best)
-	if point == null:
-		visited[best.get_instance_id()] = now
-		return false
-	ai.set_meta("bs_search_until", now + SEARCH_ON_TIME)
-	_start_loot(ai, best, false, now, point)
-	return true
-
-func _end_loot(ai, done: bool):
-	if !ai.has_meta("bs_loot"): return
-	var target = ai.get_meta("bs_loot")["target"]
-	ai.remove_meta("bs_loot")
-	ai.looting = false
-	if is_instance_valid(target):
-		target.remove_meta("bs_reserved")
-		_visited(ai)[target.get_instance_id()] = _now()
-	if !done && _debug: print(TAG + ai.name + " stopped looting")
-
-## Walk back to the hide point (Hide state; _on_hide puts the bot in Ambush on arrival).
-func _go_home(ai):
-	var home = ai.get_meta("bs_home")
-	ai.currentPoint = home
-	ai.set_meta("bs_hidept", home)
-	ai.set_meta("bs_homerun", true)
-	ai.currentState = ai.State.Hide
-	ai.ResetAnimator()
-	ai.animator["parameters/conditions/Wander"] = true
-	ai.speed = 1.0
-	ai.rotationSpeed = 5.0
-	ai.agent.target_desired_distance = 0.5
-	ai.MoveToPoint(home.global_position)
-	ai.set_meta("bs_choice", "Back to ambush")
-
-## A hider/Rat that senses something while out looting: drop it and get back into ambush (not hunt).
-func _ambush_now(ai):
-	_end_loot(ai, false)
-	if ai.has_meta("bs_home") && is_instance_valid(ai.get_meta("bs_home")) \
-			&& ai.global_position.distance_to(ai.get_meta("bs_home").global_position) < 20.0:
-		_go_home(ai)
-	else:
-		if !is_instance_valid(ai.currentPoint): return
-		ai.ChangeState("Ambush")
-	ai.set_meta("bs_choice", "Ambush!")
-	if _debug: print(TAG + ai.name + " senses something -> ambush")
-
-func _calm(ai) -> bool:
-	var sensor = ai.sensor
-	return !sensor.hot && !sensor.PVisible && float(sensor.get_meta("bs_aw", 0.0)) < 0.3 && !is_instance_valid(sensor.threatPriority)
-
-func _has_loot(c) -> bool:
-	if !is_instance_valid(c): return false
-	return !(c.storage if c.storaged else c.loot).is_empty()
-
-## Like vanilla LootContainer.AILoot() (a random item, removed from the container), but only from items that will fit
-## on the AI's body. null = empty, or nothing left in it fits.
-func _take_fitting(ai, c):
-	var pool: Array = c.storage if c.storaged else c.loot
-	var fitting := []
-	for i in pool.size():
-		if _fits(ai.container, pool[i].itemData.size): fitting.append(i)
-	if fitting.is_empty(): return null
-	var index: int = fitting.pick_random()
-	var item = pool[index]
-	pool.remove_at(index)
-	return item
-
-## Would an item of this size still show up when the player opens this body? Opening a body deletes whatever doesn't
-## fit its grid, so this replays vanilla Interface.FillContainerGrid: each loot entry in order goes to the first free
-## cell (row by row), rotated if it doesn't fit upright, and is dropped if it doesn't fit either way.
-func _fits(body, size: Vector2) -> bool:
-	var w := int(clamp(body.containerSize.x, 4, 8))
-	var h := int(clamp(body.containerSize.y, 1, 13))
-	var grid := []
-	grid.resize(w * h)
-	grid.fill(false)
-	for slot in body.loot:
-		_place(grid, w, h, slot.itemData.size)
-	return _place(grid, w, h, size)
-
-func _place(grid: Array, w: int, h: int, size: Vector2) -> bool:
-	for s in [Vector2i(int(size.x), int(size.y)), Vector2i(int(size.y), int(size.x))]:
-		for y in h:
-			for x in w:
-				if grid[y * w + x] || !_free(grid, w, h, x, y, s): continue
-				for dy in s.y:
-					for dx in s.x: grid[(y + dy) * w + x + dx] = true
-				return true
-	return false
-
-func _free(grid: Array, w: int, h: int, x: int, y: int, s: Vector2i) -> bool:
-	if x + s.x > w || y + s.y > h: return false
-	for dy in s.y:
-		for dx in s.x:
-			if grid[(y + dy) * w + x + dx]: return false
-	return true
-
-func _is_corpse(c) -> bool:
-	return c.owner != null && "variant" in c.owner
-
-func _is_map_container(c) -> bool:
-	return is_instance_valid(c) && c.is_inside_tree() && c.visible && c.process_mode != Node.PROCESS_MODE_DISABLED \
-		&& !c.locked && !c.furniture && !_is_corpse(c)
-
-func _reserved(c, ai, now: float) -> bool:
-	if !c.has_meta("bs_reserved"): return false
-	var r: Array = c.get_meta("bs_reserved")
-	return int(r[0]) != ai.get_instance_id() && now - float(r[1]) < RESERVE_TIME
-
-func _visited(ai) -> Dictionary:
-	if !ai.has_meta("bs_visited"): ai.set_meta("bs_visited", {})
-	return ai.get_meta("bs_visited")
-
-
 
 func _scan_grenades(now: float):
 	for i in range(_grenades.size() - 1, -1, -1):
@@ -2478,7 +2120,6 @@ func _physics_process(_delta):
 		var ai = bots[_tickIndex]
 		_morale(ai, now)
 		_try_heal(ai, now)
-		if _builtinLoot: _loot_tick(ai, now)
 
 
 

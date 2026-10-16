@@ -18,8 +18,11 @@ you, remember where you were, and fight with personalities instead of a dice rol
   flinching when hit, suppressive fire at your last position, deliberate single shots at long range.
 - **Morale:** hits, near misses and squadmates dying wear bots down; broken bots fall back or flee, and hurt bots heal
   behind cover if they carry meds.
-- **Grenades, dynamic cover, scavenging:** bots flush you out of known hiding spots, find cover from nearby geometry,
-  and loot houses and bodies when calm. Rats sneak into houses and camp them.
+- **Grenades and dynamic cover:** bots flush you out of known hiding spots and find cover from nearby geometry.
+  Rats sneak into houses and camp them.
+- **Looting** is a separate mod: install [AI Actually Loots](https://github.com/mmmMelted/ai-actually-loots) for
+  AI that loot houses and bodies. Hiders looting their house still drop it and go back into ambush when Bandit
+  Senses picks up a sound.
 - Applies to Bandits, Guards and Military (Nomads use it against their enemies). Bosses stay vanilla.
 - **F9** toggles a debug overlay above each bot (state, health, awareness, personality, last decision).
 
@@ -30,7 +33,7 @@ yourself with `python build.py`).
 
 ## Requirements
 
-- Road to Vostok Build 2 ("Nomads", v0.2.0.0).
+- Road to Vostok Build 2 ("Nomads"), v0.2.0.0 through v0.2.2.0.
 - [Metro Mod Loader](https://github.com/ametrocavich/vostok-mod-loader) v3.4.1 or newer.
 
 ## Install
@@ -44,13 +47,13 @@ Single player. Safe for existing saves.
 
 - **Replaces AI behaviour**, so it conflicts with other AI overhauls (AI System Overhaul, Improvised AI Tweaker,
   Simple Engagement and similar). Use one.
-- Works with my other mods: [AI Actually Loots](https://github.com/mmmMelted/ai-actually-loots) (if installed,
-  Bandit Senses hands looting to it), [Better Backpacks](https://github.com/mmmMelted/better-backpacks)
+- Works with my other mods: [AI Actually Loots](https://github.com/mmmMelted/ai-actually-loots) (it does all AI
+  looting; Bandit Senses has none of its own since 0.18.0), [Better Backpacks](https://github.com/mmmMelted/better-backpacks)
   and [Shot Indicator](https://github.com/mmmMelted/shot-indicator).
 
 ## Troubleshooting
 
-The game log (`%APPDATA%\Road to Vostok\logs\godot.log`) should show `[BanditSenses] v0.17.1 loaded`.
+The game log (`%APPDATA%\Road to Vostok\logs\godot.log`) should show `[BanditSenses] v0.18.0 loaded`.
 
 ## Credits
 
